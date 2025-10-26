@@ -78,7 +78,7 @@ function HomePage() {
 
           <div className="card" onClick={() => handleCardClick('Basic Plan')}>
             <div className="card-image-active">
-              <img src="/assets/poopa-scoopa.png" alt="Poopa Scoopa Robot" className="robot-image" />
+              <img src="/assets/poopascoopa_dog.png" alt="Poopa Scoopa Robot" className="robot-image" />
               <span className="status-badge">Available</span>
             </div>
             <div className="card-content">

@@ -31,13 +31,15 @@ function RoomModal({ isOpen, plan, onClose, onSelectRoom }) {
           <button
             className="room-button room-b"
             onClick={() => onSelectRoom('room-b')}
+            disabled
+            style={{ opacity: 0.5, cursor: 'not-allowed' }}
           >
             <div className="room-icon">📹</div>
             <div className="room-info">
               <h3>Room B</h3>
-              <p>Watch Stream</p>
+              <p>Stream and Control</p>
             </div>
-            <div className="room-badge active">Active</div>
+            <div className="room-badge">Coming Soon</div>
           </button>
         </div>
 

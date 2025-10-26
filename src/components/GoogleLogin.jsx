@@ -31,7 +31,7 @@ export const GoogleLogin = ({ onUserLogin }) => {
     // Also listen for storage changes (in case multiple tabs)
     window.addEventListener('storage', loadStoredUser);
     return () => window.removeEventListener('storage', loadStoredUser);
-  }, [onUserLogin]);
+  }, []); // Empty dependency array - only run once on mount
 
   const handleGoogleSignIn = () => {
     if (!GOOGLE_CLIENT_ID) {

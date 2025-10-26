@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import AgoraRTC, { IAgoraRTCClient, IRemoteVideoTrack, IRemoteAudioTrack } from 'agora-rtc-sdk-ng'
 import { fetchAgoraToken } from '../utils/agoraToken'
 import { GoogleLogin } from '../components/GoogleLogin'
@@ -10,16 +10,15 @@ const APP_CERTIFICATE = import.meta.env.VITE_AGORA_APP_CERTIFICATE || ''
 const API_URL = import.meta.env.VITE_API_URL || ''
 const CHANNEL_NAME = 'robot-video'
 
-// Utility function to detect Unity connections vs web viewers
-const isUnityConnection = (uid) => {
-  return uid >= 100000
-}
-
 function StreamingPage({ room, plan, onBack }) {
   const mainViewRef = useRef(null)
   const hostVideoRef = useRef(null)
   const localVideoRef = useRef(null)
   const rtcClientRef = useRef(null)
+  
+  // Persistent video element cache for PiP
+  const videoElementCacheRef = useRef(new Map())
+  const playingTracksRef = useRef(new Set())
   
   const [selectedRobot, setSelectedRobot] = useState('robot-a')
   const [isControlEnabled, setIsControlEnabled] = useState(true)
@@ -28,6 +27,17 @@ function StreamingPage({ room, plan, onBack }) {
   const [remoteUsers, setRemoteUsers] = useState(new Map())
   const [hostUser, setHostUser] = useState(null)
   const [viewerUsers, setViewerUsers] = useState(new Map())
+  
+  // PiP state
+  const [splitScreenUsers, setSplitScreenUsers] = useState([])
+  const [primaryUserIndex, setPrimaryUserIndex] = useState(0)
+  
+  // Create ref to track primaryUserIndex for use in event handlers
+  const primaryUserIndexRef = useRef(0)
+  
+  useEffect(() => {
+    primaryUserIndexRef.current = primaryUserIndex
+  }, [primaryUserIndex])
   
   // Local media state
   const [localVideoTrack, setLocalVideoTrack] = useState(null)
@@ -48,6 +58,223 @@ function StreamingPage({ room, plan, onBack }) {
   // Handle user login
   const handleUserLogin = (userData) => {
     setUser(userData)
+  }
+
+  // Update split screen display with PiP functionality
+  const updateSplitScreenDisplay = (users, overridePrimaryIndex) => {
+    if (!mainViewRef.current) return
+    
+    // Clear previous content
+    mainViewRef.current.innerHTML = ''
+    
+    // Create main PiP container
+    const pipContainer = document.createElement('div')
+    pipContainer.id = 'pip-container'
+    pipContainer.className = 'absolute inset-0 w-full h-full bg-black'
+    
+    // Create a single video container that holds all videos
+    const videoContainer = document.createElement('div')
+    videoContainer.className = 'absolute inset-0 w-full h-full'
+    videoContainer.id = 'video-container'
+    
+    // Create click area for overlay swapping (invisible overlay)
+    const overlayClickArea = document.createElement('div')
+    overlayClickArea.className = 'absolute top-4 right-4 w-1/3 h-1/3 cursor-pointer z-20'
+    overlayClickArea.id = 'pip-overlay-click'
+    overlayClickArea.style.backgroundColor = 'transparent'
+    overlayClickArea.style.pointerEvents = 'auto'
+    
+    // Add hover effect
+    overlayClickArea.addEventListener('mouseenter', () => {
+      overlayClickArea.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+    })
+    overlayClickArea.addEventListener('mouseleave', () => {
+      overlayClickArea.style.backgroundColor = 'transparent'
+    })
+    
+    // Process each user and position their video elements using CSS
+    users.forEach((user, index) => {
+      const userKey = String(user.uid)
+      
+      // Try to reuse existing video element from persistent cache
+      let videoElement = videoElementCacheRef.current.get(userKey)
+      
+      if (!videoElement && user.videoTrack) {
+        // Create new video element only if we don't have one in cache
+        videoElement = document.createElement('video')
+        videoElement.autoplay = true
+        videoElement.playsInline = true
+        videoElement.muted = true
+        videoElement.setAttribute('data-uid', userKey)
+        videoElement.style.position = 'absolute'
+        videoElement.style.objectFit = 'contain'
+        videoElement.style.backgroundColor = 'black'
+        
+        // Store in persistent cache
+        videoElementCacheRef.current.set(userKey, videoElement)
+        
+        // Add to video container ONCE - never move it again
+        videoContainer.appendChild(videoElement)
+        
+        // Play video track only once when creating new element
+        const trackKey = `${userKey}-${user.videoTrack.getTrackId()}`
+        user.videoTrack.play(videoElement)
+        playingTracksRef.current.add(trackKey)
+        console.log(`📺 Playing video for user ${user.uid} in PiP position ${index + 1}`)
+      } else if (videoElement && user.videoTrack) {
+        // Reusing existing video element - avoid calling play() unless it's a new track
+        console.log(`♻️ Reusing existing video element for user ${user.uid}`)
+        
+        // Ensure video is in the container (but don't move if already there)
+        if (videoElement.parentNode !== videoContainer) {
+          videoContainer.appendChild(videoElement)
+        }
+        
+        // Only play if this is a completely new track (different track ID)
+        const currentTrackKey = `${userKey}-${user.videoTrack.getTrackId()}`
+        if (!playingTracksRef.current.has(currentTrackKey)) {
+          // Clean up old track references for this user
+          const oldTracks = Array.from(playingTracksRef.current).filter(trackKey => 
+            trackKey.startsWith(`${userKey}-`)
+          )
+          oldTracks.forEach(trackKey => playingTracksRef.current.delete(trackKey))
+          
+          // Play new track
+          user.videoTrack.play(videoElement)
+          playingTracksRef.current.add(currentTrackKey)
+          console.log(`🔄 Playing NEW video track for user ${user.uid}`)
+        } else {
+          console.log(`✅ Video track for user ${user.uid} already playing on cached element`)
+        }
+      } else {
+        // No video element and no video track
+        console.log(`⚠️ No video track or element for user ${user.uid}`)
+        return // Skip this user
+      }
+      
+      if (!videoElement) return
+      
+      // Use override index if provided, otherwise use current state
+      const effectivePrimaryIndex = overridePrimaryIndex !== undefined ? overridePrimaryIndex : primaryUserIndex
+      
+      // Determine if this should be the main video based on effective primary index
+      const isMainVideo = (effectivePrimaryIndex === 0 && index === 0) || (effectivePrimaryIndex === 1 && index === 1)
+      
+      // Clear all positioning styles first
+      videoElement.style.top = ''
+      videoElement.style.left = ''
+      videoElement.style.right = ''
+      videoElement.style.bottom = ''
+      videoElement.style.width = ''
+      videoElement.style.height = ''
+      videoElement.style.border = ''
+      videoElement.style.borderRadius = ''
+      
+      if (isMainVideo) {
+        // Position as main video (full screen)
+        videoElement.style.top = '0px'
+        videoElement.style.left = '0px'
+        videoElement.style.width = '100%'
+        videoElement.style.height = '100%'
+        videoElement.style.zIndex = '1'
+        videoElement.style.display = 'block'
+        console.log(`🎯 Positioned user ${user.uid} as MAIN video`)
+      } else if (index < 2) {
+        // Position as overlay video (top-right corner)
+        videoElement.style.top = '16px'
+        videoElement.style.right = '16px'
+        videoElement.style.left = 'auto'
+        videoElement.style.width = '33.333333%'
+        videoElement.style.height = '33.333333%'
+        videoElement.style.zIndex = '10'
+        videoElement.style.display = 'block'
+        videoElement.style.border = '2px solid rgba(255, 255, 255, 0.3)'
+        videoElement.style.borderRadius = '8px'
+        console.log(`🎯 Positioned user ${user.uid} as OVERLAY video`)
+      } else {
+        // Hide additional users
+        videoElement.style.display = 'none'
+      }
+    })
+    
+    // Add click handler to overlay area for swapping
+    const handleOverlayClick = () => {
+      const currentPrimaryIndex = primaryUserIndexRef.current
+      console.log('Overlay clicked, current primaryUserIndex:', currentPrimaryIndex)
+      const newPrimaryIndex = currentPrimaryIndex === 0 ? 1 : 0
+      console.log('Setting new primaryUserIndex:', newPrimaryIndex)
+      setPrimaryUserIndex(newPrimaryIndex)
+      // Force immediate update after swap with new primary index
+      setTimeout(() => {
+        updateSplitScreenDisplay(users, newPrimaryIndex)
+      }, 50)
+    }
+    
+    overlayClickArea.addEventListener('click', handleOverlayClick)
+    
+    // Store reference for cleanup
+    overlayClickArea._clickHandler = handleOverlayClick
+    
+    // Add user info overlays
+    users.forEach((user, index) => {
+      const effectivePrimaryIndex = overridePrimaryIndex !== undefined ? overridePrimaryIndex : primaryUserIndex
+      const isMainVideo = (effectivePrimaryIndex === 0 && index === 0) || (effectivePrimaryIndex === 1 && index === 1)
+      
+      if (isMainVideo) {
+        // Main video overlay
+        const mainOverlay = document.createElement('div')
+        mainOverlay.className = 'absolute bottom-4 left-4 bg-black/70 text-white px-3 py-1 rounded-lg text-sm z-20'
+        mainOverlay.textContent = `${user.uid} (Main)`
+        pipContainer.appendChild(mainOverlay)
+      } else if (index < 2) {
+        // PiP video overlay
+        const pipOverlay = document.createElement('div')
+        pipOverlay.className = 'absolute top-5 right-5 bg-black/70 text-white px-2 py-0.5 rounded text-xs z-20'
+        pipOverlay.textContent = String(user.uid)
+        pipContainer.appendChild(pipOverlay)
+      }
+    })
+    
+    // Add placeholders
+    if (users.length === 0) {
+      // Main video placeholder
+      const mainPlaceholder = document.createElement('div')
+      mainPlaceholder.className = 'absolute inset-0 flex flex-col items-center justify-center bg-gray-900 text-white'
+      mainPlaceholder.innerHTML = `
+        <div class="text-center">
+          <div class="text-6xl mb-4">📹</div>
+          <div class="text-lg font-semibold">Waiting for stream...</div>
+          <div class="text-sm text-gray-400 mt-2">Main view will appear here</div>
+        </div>
+      `
+      pipContainer.appendChild(mainPlaceholder)
+      
+      // PiP overlay placeholder
+      const pipPlaceholder = document.createElement('div')
+      pipPlaceholder.className = 'absolute top-4 right-4 w-1/3 h-1/3 flex items-center justify-center bg-gray-800/80 text-white/60 border-2 border-white/30 rounded-lg z-10 cursor-pointer'
+      pipPlaceholder.innerHTML = `
+        <div class="text-center">
+          <div class="text-2xl mb-2">⏳</div>
+          <div class="text-xs">Click when ready</div>
+        </div>
+      `
+      pipContainer.appendChild(pipPlaceholder)
+    } else if (users.length === 1) {
+      // Only one user - show placeholder for second slot
+      const placeholder = document.createElement('div')
+      placeholder.className = 'absolute top-4 right-4 w-1/3 h-1/3 flex items-center justify-center bg-gray-800/80 text-white/60 border-2 border-white/30 rounded-lg z-10'
+      placeholder.innerHTML = '<div class="text-center"><div class="text-2xl mb-2">⏳</div><div class="text-xs">Waiting for more users...</div></div>'
+      pipContainer.appendChild(placeholder)
+    }
+    
+    // Append video container to main PiP container
+    pipContainer.appendChild(videoContainer)
+    pipContainer.appendChild(overlayClickArea)
+    
+    // Add the PiP container to the main view
+    mainViewRef.current.appendChild(pipContainer)
+    
+    console.log(`✅ Split screen updated with ${users.length} users`)
   }
 
   // Connect to Agora stream
@@ -95,76 +322,35 @@ function StreamingPage({ room, plan, onBack }) {
             existingUser.videoTrack = user.videoTrack
             existingUser.hasVideo = true
             
-            const isUnityUser = isUnityConnection(user.uid)
-            const isFirstRobot = !hostUser
-            const shouldBeHost = isUnityUser && isFirstRobot
-            
-            if (shouldBeHost) {
-              console.log(`👑 User ${user.uid} becoming host`)
+            // Add user to split screen (first 2 users get split screen)
+            setSplitScreenUsers(prev => {
+              const updated = [...prev]
+              const existingIndex = updated.findIndex(u => u.uid === existingUser.uid)
               
+              if (existingIndex >= 0) {
+                // Update existing user
+                updated[existingIndex] = existingUser
+              } else if (updated.length < 2) {
+                // Add new user to split screen if space available
+                updated.push(existingUser)
+                console.log(`📺 Added user ${user.uid} to split screen (position ${updated.length})`)
+              }
+              
+              // Update split screen display
+              updateSplitScreenDisplay(updated)
+              
+              return updated
+            })
+            
+            // Determine if this is the host (first video publisher or has higher authority)
+            if (!hostUser) {
+              console.log(`👑 User ${user.uid} is now the HOST`)
               existingUser.isHost = true
               setHostUser(existingUser)
-              
-              // Create host video container
-              if (mainViewRef.current) {
-                const mainContainer = document.createElement('div')
-                mainContainer.id = `main-host-${user.uid}`
-                mainContainer.className = 'w-full h-full bg-black flex items-center justify-center'
-                
-                const hostVideo = document.createElement('video')
-                hostVideo.className = 'max-w-full max-h-full'
-                hostVideo.style.width = 'auto'
-                hostVideo.style.height = 'auto'
-                hostVideo.autoplay = true
-                hostVideo.playsInline = true
-                hostVideo.muted = true
-                hostVideo.id = `host-video-${user.uid}`
-                hostVideoRef.current = hostVideo
-                
-                mainContainer.appendChild(hostVideo)
-                mainViewRef.current.innerHTML = ''
-                mainViewRef.current.appendChild(mainContainer)
-                
-                try {
-                  user.videoTrack.play(hostVideo)
-                  console.log(`✅ Host video playing`)
-                } catch (error) {
-                  console.error(`❌ Error playing video:`, error)
-                }
-              }
             } else {
-              console.log(`👥 User ${user.uid} is a viewer`)
+              console.log(`👥 User ${user.uid} is a VIEWER with video`)
               existingUser.isHost = false
               setViewerUsers(prev => new Map(prev.set(user.uid, existingUser)))
-              
-              // For viewers, if there's no host yet, show this as the main video
-              if (!hostUser && mainViewRef.current) {
-                console.log(`📺 Displaying viewer ${user.uid} as main video (no host yet)`)
-                
-                const mainContainer = document.createElement('div')
-                mainContainer.id = `viewer-video-${user.uid}`
-                mainContainer.className = 'w-full h-full bg-black flex items-center justify-center'
-                
-                const viewerVideo = document.createElement('video')
-                viewerVideo.className = 'max-w-full max-h-full'
-                viewerVideo.style.width = 'auto'
-                viewerVideo.style.height = 'auto'
-                viewerVideo.autoplay = true
-                viewerVideo.playsInline = true
-                viewerVideo.muted = true
-                viewerVideo.id = `video-${user.uid}`
-                
-                mainContainer.appendChild(viewerVideo)
-                mainViewRef.current.innerHTML = ''
-                mainViewRef.current.appendChild(mainContainer)
-                
-                try {
-                  user.videoTrack.play(viewerVideo)
-                  console.log(`✅ Viewer video playing`)
-                } catch (error) {
-                  console.error(`❌ Error playing viewer video:`, error)
-                }
-              }
             }
           }
           
@@ -183,13 +369,17 @@ function StreamingPage({ room, plan, onBack }) {
         console.log(`🔇 User ${user.uid} unpublished ${mediaType}`)
         
         if (mediaType === 'video') {
+          // Remove user from split screen
+          setSplitScreenUsers(prev => {
+            const updated = prev.filter(u => u.uid !== user.uid)
+            updateSplitScreenDisplay(updated)
+            return updated
+          })
+          
           const remoteUser = remoteUsers.get(user.uid)
           if (remoteUser?.isHost) {
-            const mainContainer = document.getElementById(`main-host-${user.uid}`)
-            if (mainContainer) {
-              mainContainer.remove()
-            }
             setHostUser(null)
+            console.log(`👑❌ Host stopped streaming`)
           }
         }
         
@@ -197,8 +387,16 @@ function StreamingPage({ room, plan, onBack }) {
           const newMap = new Map(prev)
           const existingUser = newMap.get(user.uid)
           if (existingUser) {
-            if (mediaType === 'video') delete existingUser.videoTrack
-            if (mediaType === 'audio') delete existingUser.audioTrack
+            if (mediaType === 'video') {
+              delete existingUser.videoTrack
+              existingUser.hasVideo = false
+            }
+            if (mediaType === 'audio') {
+              delete existingUser.audioTrack
+              existingUser.hasAudio = false
+            }
+            
+            // Keep the user in remoteUsers even if they're not publishing
             newMap.set(user.uid, existingUser)
           }
           return newMap
@@ -208,13 +406,34 @@ function StreamingPage({ room, plan, onBack }) {
       client.on('user-left', (user) => {
         console.log(`🔴 User ${user.uid} left the channel`)
         
+        // Clean up video element and playing tracks from cache
+        const userKey = String(user.uid)
+        const cachedElement = videoElementCacheRef.current.get(userKey)
+        if (cachedElement) {
+          videoElementCacheRef.current.delete(userKey)
+          console.log(`🗑️ Cleaned up cached video element for user ${user.uid}`)
+        }
+        
+        // Clean up playing tracks for this user
+        const tracksToRemove = Array.from(playingTracksRef.current).filter(trackKey => 
+          trackKey.startsWith(`${userKey}-`)
+        )
+        tracksToRemove.forEach(trackKey => {
+          playingTracksRef.current.delete(trackKey)
+          console.log(`🗑️ Cleaned up playing track: ${trackKey}`)
+        })
+        
+        // Remove user from split screen
+        setSplitScreenUsers(prev => {
+          const updated = prev.filter(u => u.uid !== user.uid)
+          updateSplitScreenDisplay(updated)
+          return updated
+        })
+        
         const remoteUser = remoteUsers.get(user.uid)
         if (remoteUser?.isHost) {
-          const mainContainer = document.getElementById(`main-host-${user.uid}`)
-          if (mainContainer) {
-            mainContainer.remove()
-          }
           setHostUser(null)
+          console.log(`👑🚪 Host left`)
         }
         
         setRemoteUsers(prev => {
@@ -273,6 +492,12 @@ function StreamingPage({ room, plan, onBack }) {
       }
     }
   }, [])
+
+  // Update split screen display when splitScreenUsers or primaryUserIndex changes
+  // Also render on mount to show placeholder
+  useEffect(() => {
+    updateSplitScreenDisplay(splitScreenUsers)
+  }, [splitScreenUsers, primaryUserIndex])
 
   const handleCommand = (direction) => {
     if (!isControlEnabled) return
@@ -371,17 +596,7 @@ function StreamingPage({ room, plan, onBack }) {
       <div className="streaming-layout">
         {/* Main Video Area */}
         <div className="main-video-area">
-          <div className="video-container" ref={mainViewRef}>
-            {!hostUser && !isAgoraConnected && (
-              <div className="video-placeholder">
-                <div className="video-icon">📹</div>
-                <p>Waiting for stream...</p>
-                <span className="room-badge-inline">
-                  {isRoomA ? '🎮 Stream & Control' : '👁️ Watch Only'}
-                </span>
-              </div>
-            )}
-          </div>
+          <div className="video-container" ref={mainViewRef}></div>
 
           {/* Connection Status */}
           <div className="status-overlay">
@@ -405,7 +620,7 @@ function StreamingPage({ room, plan, onBack }) {
           <div className="control-panel">
             <div className="panel-header">
               <h3>Robot Control</h3>
-              <p>Navigate robots across the grid</p>
+              <p>Navigate robots</p>
             </div>
 
             {/* Robot Selection */}
