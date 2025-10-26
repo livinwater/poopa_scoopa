@@ -510,7 +510,7 @@ function StreamingPage({ room, plan, onBack }) {
       const blockchainSuccess = {
         id: `${commandId}-blockchain`,
         timestamp: new Date().toLocaleTimeString(),
-        command: `✅ Blockchain confirmed: ${Math.random().toString(36).substring(7)}`,
+        command: `✅ Confirmed: ${Math.random().toString(36).substring(7)}`,
         status: 'acknowledged',
         source: 'blockchain'
       }
