@@ -1,8 +1,7 @@
 # Poopa Scoopa
 
-**Taking the dirty work out of pet ownership**
+**Smart tech for crappy situations**
 
-Smart tech for crappy situations.
 
 ## About
 
