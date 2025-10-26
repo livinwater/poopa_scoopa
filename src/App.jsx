@@ -1,13 +1,40 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
 import './App.css'
 import RoomModal from './components/RoomModal'
 import StreamingPage from './pages/StreamingPage'
+import AuthCallback from './pages/AuthCallback'
+import { GoogleLogin } from './components/GoogleLogin'
 
 function HomePage() {
   const navigate = useNavigate()
   const [isRoomModalOpen, setRoomModalOpen] = useState(false)
   const [selectedPlanName, setSelectedPlanName] = useState(null)
+  const [user, setUser] = useState(null)
+
+  const handleUserLogin = (userData) => {
+    setUser(userData)
+    if (userData) {
+      console.log('User logged in:', userData.email)
+    } else {
+      console.log('User logged out')
+    }
+  }
+
+  // Load user from localStorage on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem('google_user')
+    if (storedUser) {
+      try {
+        const userData = JSON.parse(storedUser)
+        console.log('Loading user from localStorage:', userData.email)
+        setUser(userData)
+      } catch (error) {
+        console.error('Error parsing stored user:', error)
+        localStorage.removeItem('google_user')
+      }
+    }
+  }, [])
 
   const handleCardClick = (planName) => {
     setSelectedPlanName(planName)
@@ -28,7 +55,7 @@ function HomePage() {
             <h1 className="main-title">Poopa Scoopa</h1>
             <p className="header-subtitle">Select a plan to get started</p>
           </div>
-          <button className="btn-google">G Continue with Google</button>
+          <GoogleLogin onUserLogin={handleUserLogin} />
         </div>
 
         <div className="cards-container">
@@ -122,6 +149,7 @@ function AppRouter() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/streaming" element={<StreamingPageWrapper />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
     </Routes>
   )
 }

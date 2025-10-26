@@ -15,12 +15,32 @@ VITE_AGORA_APP_CERTIFICATE=your_agora_app_certificate_here
 VITE_API_URL=http://localhost:3000
 ```
 
+### Google OAuth Configuration
+```env
+VITE_GOOGLE_CLIENT_ID=your_google_client_id_here
+GOOGLE_CLIENT_SECRET=your_google_client_secret_here
+```
+
 ## How to Get Your Agora Credentials
 
 1. Sign up for an Agora account at [https://www.agora.io/](https://www.agora.io/)
 2. Create a new project in the Agora Console
 3. Copy your App ID and App Certificate
 4. Add them to your `.env` file
+
+## How to Get Your Google OAuth Credentials
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project or select an existing one
+3. Enable the Google+ API
+4. Go to "Credentials" → "Create Credentials" → "OAuth client ID"
+5. Configure the OAuth consent screen if prompted
+6. Choose "Web application" as the application type
+7. Add authorized redirect URIs:
+   - `http://localhost:5173/auth/callback` (for local development)
+   - Your production URL (e.g., `https://yourdomain.com/auth/callback`)
+8. Copy the Client ID and Client Secret
+9. Add them to your `.env` file
 
 ## Setting Up Your .env File
 

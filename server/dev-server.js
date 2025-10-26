@@ -88,6 +88,77 @@ app.get('/api/agora/token', async (req, res) => {
   }
 });
 
+// Google OAuth endpoint
+app.post('/api/google-oauth', async (req, res) => {
+  try {
+    const { code, redirect_uri } = req.body;
+
+    if (!code || !redirect_uri) {
+      return res.status(400).json({ error: 'Missing code or redirect_uri' });
+    }
+
+    // Get Google OAuth credentials
+    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || process.env.VITE_GOOGLE_CLIENT_ID;
+    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
+      console.error('Google OAuth credentials missing');
+      return res.status(500).json({ error: 'Google OAuth credentials not configured' });
+    }
+
+    // Exchange code for tokens
+    const tokenEndpoint = 'https://oauth2.googleapis.com/token';
+    const params = new URLSearchParams({
+      code,
+      client_id: GOOGLE_CLIENT_ID,
+      client_secret: GOOGLE_CLIENT_SECRET,
+      redirect_uri,
+      grant_type: 'authorization_code',
+    });
+
+    const response = await fetch(tokenEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: params,
+    });
+
+    const responseData = await response.text();
+
+    if (!response.ok) {
+      console.error('Google token exchange error:', responseData);
+      return res.status(400).json({ error: 'Failed to exchange code for tokens' });
+    }
+
+    const tokens = JSON.parse(responseData);
+    
+    // Fetch user info from Google
+    const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+      },
+    });
+
+    const userInfo = await userInfoResponse.json();
+    
+    // Return tokens and user info
+    res.status(200).json({
+      ...tokens,
+      user: {
+        email: userInfo.email,
+        name: userInfo.name,
+        picture: userInfo.picture,
+        id: userInfo.id
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in Google OAuth exchange:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -96,5 +167,6 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Dev server running on port ${PORT}`);
   console.log(`📡 Token endpoint: http://localhost:${PORT}/api/agora/token`);
+  console.log(`🔐 Google OAuth: http://localhost:${PORT}/api/google-oauth`);
   console.log(`💚 Health check: http://localhost:${PORT}/health`);
 });

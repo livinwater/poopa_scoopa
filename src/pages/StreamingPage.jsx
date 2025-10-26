@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import AgoraRTC, { IAgoraRTCClient, IRemoteVideoTrack, IRemoteAudioTrack } from 'agora-rtc-sdk-ng'
 import { fetchAgoraToken } from '../utils/agoraToken'
+import { GoogleLogin } from '../components/GoogleLogin'
 import '../pages/StreamingPage.css'
 
 // Agora configuration from environment variables
@@ -34,12 +35,20 @@ function StreamingPage({ room, plan, onBack }) {
   const [isCameraEnabled, setIsCameraEnabled] = useState(false)
   const [isMicEnabled, setIsMicEnabled] = useState(false)
 
+  // User state for Google login
+  const [user, setUser] = useState(null)
+
   const robots = [
     { id: 'robot-a', name: 'Robot A', battery: 85, status: 'idle' },
     { id: 'robot-b', name: 'Robot B', battery: 92, status: 'idle' }
   ]
 
   const [robotCommands, setRobotCommands] = useState([])
+
+  // Handle user login
+  const handleUserLogin = (userData) => {
+    setUser(userData)
+  }
 
   // Connect to Agora stream
   const connectToAgoraStream = async () => {
@@ -347,6 +356,16 @@ function StreamingPage({ room, plan, onBack }) {
           <h1 className="streaming-title">{plan}</h1>
           <p className="streaming-subtitle">{isRoomA ? 'Room A - Stream & Control' : 'Room B - Watch Only'}</p>
         </div>
+        <div className="header-actions">
+          {isRoomA && (
+            <div className="header-ready-status">
+              <span className={`status-badge-header ${isControlEnabled ? 'enabled' : 'disabled'}`}>
+                {isControlEnabled ? '✓ Ready' : '⏳ Processing...'}
+              </span>
+            </div>
+          )}
+          <GoogleLogin onUserLogin={handleUserLogin} />
+        </div>
       </div>
 
       <div className="streaming-layout">
@@ -452,13 +471,6 @@ function StreamingPage({ room, plan, onBack }) {
                   ↓
                 </button>
               </div>
-            </div>
-
-            {/* Control Status */}
-            <div className="control-status">
-              <span className={`status-badge ${isControlEnabled ? 'enabled' : 'disabled'}`}>
-                {isControlEnabled ? '✓ Ready' : '⏳ Processing...'}
-              </span>
             </div>
 
             {/* Robot Status */}
