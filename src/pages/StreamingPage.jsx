@@ -81,16 +81,6 @@ function StreamingPage({ room, plan, onBack }) {
     const overlayClickArea = document.createElement('div')
     overlayClickArea.className = 'absolute top-4 right-4 w-1/3 h-1/3 cursor-pointer z-20'
     overlayClickArea.id = 'pip-overlay-click'
-    overlayClickArea.style.backgroundColor = 'transparent'
-    overlayClickArea.style.pointerEvents = 'auto'
-    
-    // Add hover effect
-    overlayClickArea.addEventListener('mouseenter', () => {
-      overlayClickArea.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
-    })
-    overlayClickArea.addEventListener('mouseleave', () => {
-      overlayClickArea.style.backgroundColor = 'transparent'
-    })
     
     // Process each user and position their video elements using CSS
     users.forEach((user, index) => {
